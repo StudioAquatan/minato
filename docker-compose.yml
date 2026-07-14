@@ -11,7 +11,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minato} -d ${POSTGRES_DB:-minato}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-minato} -d ${POSTGRES_DB:-minato}",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -41,12 +45,12 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     # GPU access is opt-in; uncomment on a machine with an NVIDIA GPU.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
 
 volumes:
   postgres_data:
