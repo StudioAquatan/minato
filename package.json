@@ -1,0 +1,25 @@
+{
+  "name": "minato",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "cli": "pnpm --filter @minato/cli exec tsx src/index.ts",
+    "worker": "pnpm --filter @minato/worker exec tsx src/index.ts",
+    "db:generate": "pnpm --filter @minato/adapters exec drizzle-kit generate",
+    "db:migrate": "pnpm --filter @minato/adapters exec tsx src/db/postgres/migrate.ts",
+    "db:studio": "pnpm --filter @minato/adapters exec drizzle-kit studio"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

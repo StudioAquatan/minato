@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.tsbuildinfo
+*.tsbuildinfo
+coverage/
+
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+data/
+storage/
+
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json.example
+
+# Drizzle
+drizzle/meta/_journal.json.bak
