@@ -1,10 +1,12 @@
 import type {
+  BiblioResolver,
   ChunkRepository,
   CitationRepository,
   FileRepository,
   IndexAdmin,
   IndexGenerationRepository,
   JobQueue,
+  PaperMatcher,
   PaperRepository,
   PdfParser,
   PdfStorage,
@@ -32,4 +34,6 @@ export type Deps = {
   clock: Clock;
   idGen: IdGen;
   chunker: ChunkerConfig;
+  matcher?: PaperMatcher;
+  biblio?: BiblioResolver;
 };

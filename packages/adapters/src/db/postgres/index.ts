@@ -9,4 +9,5 @@ export * from "./summary-repository.js";
 export * from "./approval-repository.js";
 export * from "./audit-log-repository.js";
 export * from "./index-generation-repository.js";
+export * from "./external-api-cache-repository.js";
 export * from "./job-queue.js";

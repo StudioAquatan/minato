@@ -54,7 +54,18 @@ export type OaPdfCandidate = {
   sizeBytes: number | null;
 };
 
+export type PaperMatchInput = {
+  raw: RefString;
+  doi?: string | null;
+  title?: string | null;
+  authorsHint?: string | null;
+  year?: number | null;
+};
+
 export type PaperMatchResult =
-  | { kind: "resolved"; paperId: PaperId; score: number }
-  | { kind: "ambiguous"; candidates: { paperId: PaperId; score: number }[] }
+  | { kind: "resolved"; paperId: PaperId; score: number; reasons: string[] }
+  | {
+      kind: "ambiguous";
+      candidates: { paperId: PaperId; score: number; reasons: string[] }[];
+    }
   | { kind: "unresolved" };

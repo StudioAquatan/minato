@@ -1,6 +1,7 @@
 import type {
   OaPdfCandidate,
   ParsedDocument,
+  PaperMatchInput,
   PdfParseInput,
   ResolvedReference,
   RefString,
@@ -13,10 +14,12 @@ export interface PdfParser {
 }
 
 export interface BiblioResolver {
+  readonly version: string;
   resolve(ref: RefString): Promise<ResolvedReference | null>;
   findOaPdf(ref: ResolvedReference): Promise<OaPdfCandidate | null>;
 }
 
 export interface PaperMatcher {
-  match(ref: RefString): Promise<PaperMatchResult>;
+  readonly version: string;
+  match(input: PaperMatchInput): Promise<PaperMatchResult>;
 }

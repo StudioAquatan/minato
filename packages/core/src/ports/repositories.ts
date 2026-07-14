@@ -18,6 +18,7 @@ import type {
   PaperMatchCandidate,
   PaperMatchQuery,
   PaperStatus,
+  ReferenceId,
   ReferenceRecord,
   Section,
   StoredSummary,
@@ -58,10 +59,26 @@ export interface ChunkRepository {
   streamAll(batchSize: number): AsyncIterable<Chunk[]>;
 }
 
+export type ReferenceResolutionUpdate = {
+  resolvedPaperId: PaperId | null;
+  resolveState: ReferenceRecord["resolveState"];
+  resolveScore: number | null;
+  resolverVersion: string | null;
+  doi?: string | null;
+  title?: string | null;
+  authorsHint?: string | null;
+  year?: number | null;
+};
+
 export interface CitationRepository {
   replaceReferences(
     paperId: PaperId,
     refs: ReferenceRecord[],
+  ): Promise<void>;
+  listReferencesForPaper(paperId: PaperId): Promise<ReferenceRecord[]>;
+  updateReferenceResolution(
+    referenceId: ReferenceId,
+    update: ReferenceResolutionUpdate,
   ): Promise<void>;
   upsertEdges(edges: CitationEdge[]): Promise<void>;
   findCiting(paperId: PaperId): Promise<PaperId[]>;

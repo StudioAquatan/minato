@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnvFile } from "dotenv";
 import {
   defaultChunkerConfig,
+  makePaperMatcher,
   systemClock,
   uuidIdGen,
   type Deps,
@@ -14,6 +15,7 @@ import {
   makeAuditLogRepository,
   makeChunkRepository,
   makeCitationRepository,
+  makeExternalApiCacheRepository,
   makeFileRepository,
   makeIndexGenerationRepository,
   makeJobQueue,
@@ -29,6 +31,13 @@ import {
   OpenDataLoaderParser,
 } from "@minato/adapters/parser";
 import { LocalPdfStorage } from "@minato/adapters/storage";
+import {
+  BiblioResolverAdapter,
+  CrossrefClient,
+  DbBiblioCache,
+  OpenAlexClient,
+  UnpaywallClient,
+} from "@minato/adapters/biblio";
 
 const findWorkspaceRoot = (start: string): string => {
   let dir = resolve(start);
@@ -58,6 +67,13 @@ export type BootstrapConfig = {
   grobidConcurrency: number;
   grobidRequestTimeoutMs: number;
   grobidMaxRetries: number;
+  biblioMailto: string | null;
+  biblioConcurrency: number;
+  biblioRequestTimeoutMs: number;
+  biblioMaxRetries: number;
+  unpaywallEmail: string | null;
+  openalexEnabled: boolean;
+  crossrefEnabled: boolean;
 };
 
 const readEnv = (key: string, fallback?: string): string => {
@@ -86,6 +102,15 @@ export const loadConfig = (): BootstrapConfig => ({
     readEnv("GROBID_REQUEST_TIMEOUT_MS", "300000"),
   ),
   grobidMaxRetries: Number(readEnv("GROBID_MAX_RETRIES", "3")),
+  biblioMailto: process.env["BIBLIO_MAILTO"] || null,
+  biblioConcurrency: Number(readEnv("BIBLIO_CONCURRENCY", "4")),
+  biblioRequestTimeoutMs: Number(
+    readEnv("BIBLIO_REQUEST_TIMEOUT_MS", "15000"),
+  ),
+  biblioMaxRetries: Number(readEnv("BIBLIO_MAX_RETRIES", "3")),
+  unpaywallEmail: process.env["UNPAYWALL_EMAIL"] || null,
+  openalexEnabled: readEnv("BIBLIO_OPENALEX", "1") !== "0",
+  crossrefEnabled: readEnv("BIBLIO_CROSSREF", "1") !== "0",
 });
 
 export type Runtime = {
@@ -130,8 +155,53 @@ export const bootstrap = async (): Promise<Runtime> => {
   });
 
   const citations = makeCitationRepository(db);
+  const papersRepo = makePaperRepository(db);
+  const externalApiCache = makeExternalApiCacheRepository(db);
+  const biblioCache = new DbBiblioCache(externalApiCache);
+
+  const openalex =
+    config.openalexEnabled
+      ? new OpenAlexClient({
+          ...(config.biblioMailto ? { mailto: config.biblioMailto } : {}),
+          concurrency: config.biblioConcurrency,
+          requestTimeoutMs: config.biblioRequestTimeoutMs,
+          maxRetries: config.biblioMaxRetries,
+          cache: biblioCache,
+        })
+      : null;
+  const crossref =
+    config.crossrefEnabled
+      ? new CrossrefClient({
+          ...(config.biblioMailto ? { mailto: config.biblioMailto } : {}),
+          concurrency: config.biblioConcurrency,
+          requestTimeoutMs: config.biblioRequestTimeoutMs,
+          maxRetries: config.biblioMaxRetries,
+          cache: biblioCache,
+        })
+      : null;
+  const unpaywall = config.unpaywallEmail
+    ? new UnpaywallClient({
+        email: config.unpaywallEmail,
+        concurrency: config.biblioConcurrency,
+        requestTimeoutMs: config.biblioRequestTimeoutMs,
+        maxRetries: config.biblioMaxRetries,
+        cache: biblioCache,
+      })
+    : null;
+
+  const biblio =
+    openalex || crossref
+      ? new BiblioResolverAdapter({
+          ...(openalex ? { openalex } : {}),
+          ...(crossref ? { crossref } : {}),
+          ...(unpaywall ? { unpaywall } : {}),
+        })
+      : null;
+
+  const matcher = makePaperMatcher(papersRepo);
+
   const deps: Deps = {
-    papers: makePaperRepository(db),
+    papers: papersRepo,
     files: makeFileRepository(db),
     sections: makeSectionRepository(db),
     chunks: makeChunkRepository(db),
@@ -146,6 +216,8 @@ export const bootstrap = async (): Promise<Runtime> => {
     clock: systemClock,
     idGen: uuidIdGen,
     chunker: defaultChunkerConfig(parser.parserVersion),
+    matcher,
+    ...(biblio ? { biblio } : {}),
   };
 
   return {

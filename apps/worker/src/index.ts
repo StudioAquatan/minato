@@ -4,7 +4,7 @@ import { runWorker } from "./loop.js";
 const main = async () => {
   const runtime = await bootstrap();
   const workerId = process.env.WORKER_ID ?? `worker-${process.pid}`;
-  const lanes = (process.env.WORKER_LANES ?? "default,parse,index,embed")
+  const lanes = (process.env.WORKER_LANES ?? "default,parse,resolve,index,embed")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

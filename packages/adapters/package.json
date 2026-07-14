@@ -11,7 +11,8 @@
     "./search": "./src/search/index.ts",
     "./llm": "./src/llm/index.ts",
     "./parser": "./src/parser/index.ts",
-    "./storage": "./src/storage/index.ts"
+    "./storage": "./src/storage/index.ts",
+    "./biblio": "./src/biblio/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

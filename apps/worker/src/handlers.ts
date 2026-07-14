@@ -1,9 +1,11 @@
 import type { Job, JobKind, JobResult, JobSpec, Deps } from "@minato/core";
 import {
+  buildCitationEdges,
   indexPaper,
   parsePdfBatch,
   persistDocument,
   rebuildIndex,
+  resolveReferences,
 } from "@minato/core";
 
 export type Handler = (
@@ -21,6 +23,22 @@ const persistDocumentHandler: Handler = async (deps, payload) => {
   const out = await persistDocument(
     deps,
     payload as Parameters<typeof persistDocument>[1],
+  );
+  return { output: out, followUp: out.followUp };
+};
+
+const resolveReferencesHandler: Handler = async (deps, payload) => {
+  const out = await resolveReferences(
+    deps,
+    payload as Parameters<typeof resolveReferences>[1],
+  );
+  return { output: out, followUp: out.followUp };
+};
+
+const buildCitationEdgesHandler: Handler = async (deps, payload) => {
+  const out = await buildCitationEdges(
+    deps,
+    payload as Parameters<typeof buildCitationEdges>[1],
   );
   return { output: out, followUp: out.followUp };
 };
@@ -54,6 +72,10 @@ export const handlerFor = (kind: JobKind): Handler => {
       return parsePdfBatchHandler;
     case "persist_document":
       return persistDocumentHandler;
+    case "resolve_references":
+      return resolveReferencesHandler;
+    case "build_citation_edges":
+      return buildCitationEdgesHandler;
     case "index_paper":
       return indexPaperHandler;
     case "rebuild_index":

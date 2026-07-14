@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnvFile } from "dotenv";
 import {
   defaultChunkerConfig,
+  makePaperMatcher,
   systemClock,
   uuidIdGen,
   type Deps,
@@ -12,6 +13,7 @@ import {
   createDb,
   makeChunkRepository,
   makeCitationRepository,
+  makeExternalApiCacheRepository,
   makeFileRepository,
   makeIndexGenerationRepository,
   makeJobQueue,
@@ -26,6 +28,13 @@ import {
   OpenDataLoaderParser,
 } from "@minato/adapters/parser";
 import { LocalPdfStorage } from "@minato/adapters/storage";
+import {
+  BiblioResolverAdapter,
+  CrossrefClient,
+  DbBiblioCache,
+  OpenAlexClient,
+  UnpaywallClient,
+} from "@minato/adapters/biblio";
 
 const findWorkspaceRoot = (start: string): string => {
   let dir = resolve(start);
@@ -87,8 +96,54 @@ export const bootstrapCli = async (): Promise<CliRuntime> => {
     embeddingDimensions: Number(env("EMBEDDING_DIMENSIONS", "1024")),
     embedder,
   });
+  const papersRepo = makePaperRepository(db);
+  const biblioMailto = process.env["BIBLIO_MAILTO"] || null;
+  const biblioConcurrency = Number(env("BIBLIO_CONCURRENCY", "4"));
+  const biblioRequestTimeoutMs = Number(env("BIBLIO_REQUEST_TIMEOUT_MS", "15000"));
+  const biblioMaxRetries = Number(env("BIBLIO_MAX_RETRIES", "3"));
+  const openalexEnabled = env("BIBLIO_OPENALEX", "1") !== "0";
+  const crossrefEnabled = env("BIBLIO_CROSSREF", "1") !== "0";
+  const unpaywallEmail = process.env["UNPAYWALL_EMAIL"] || null;
+  const biblioCache = new DbBiblioCache(makeExternalApiCacheRepository(db));
+
+  const openalex = openalexEnabled
+    ? new OpenAlexClient({
+        ...(biblioMailto ? { mailto: biblioMailto } : {}),
+        concurrency: biblioConcurrency,
+        requestTimeoutMs: biblioRequestTimeoutMs,
+        maxRetries: biblioMaxRetries,
+        cache: biblioCache,
+      })
+    : null;
+  const crossref = crossrefEnabled
+    ? new CrossrefClient({
+        ...(biblioMailto ? { mailto: biblioMailto } : {}),
+        concurrency: biblioConcurrency,
+        requestTimeoutMs: biblioRequestTimeoutMs,
+        maxRetries: biblioMaxRetries,
+        cache: biblioCache,
+      })
+    : null;
+  const unpaywall = unpaywallEmail
+    ? new UnpaywallClient({
+        email: unpaywallEmail,
+        concurrency: biblioConcurrency,
+        requestTimeoutMs: biblioRequestTimeoutMs,
+        maxRetries: biblioMaxRetries,
+        cache: biblioCache,
+      })
+    : null;
+  const biblio =
+    openalex || crossref
+      ? new BiblioResolverAdapter({
+          ...(openalex ? { openalex } : {}),
+          ...(crossref ? { crossref } : {}),
+          ...(unpaywall ? { unpaywall } : {}),
+        })
+      : null;
+
   const deps: Deps = {
-    papers: makePaperRepository(db),
+    papers: papersRepo,
     files: makeFileRepository(db),
     sections: makeSectionRepository(db),
     chunks: makeChunkRepository(db),
@@ -103,6 +158,8 @@ export const bootstrapCli = async (): Promise<CliRuntime> => {
     clock: systemClock,
     idGen: uuidIdGen,
     chunker: defaultChunkerConfig(parser.parserVersion),
+    matcher: makePaperMatcher(papersRepo),
+    ...(biblio ? { biblio } : {}),
   };
   return {
     deps,

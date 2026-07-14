@@ -103,5 +103,18 @@ export const persistDocument = async (
     },
   ];
 
+  if (deps.citations && document.references.length > 0) {
+    const resolverVersion =
+      [deps.matcher?.version, deps.biblio?.version]
+        .filter(Boolean)
+        .join("+") || "no-resolver";
+    followUp.push({
+      kind: "resolve_references",
+      lane: "resolve",
+      payload: { paperId },
+      idempotencyKey: `resolve:${paperId}:${document.parserVersion}:${resolverVersion}`,
+    });
+  }
+
   return { paperId, chunkCount: chunks.length, followUp };
 };

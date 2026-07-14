@@ -1,15 +1,33 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type {
   CitationEdge,
   CitationRepository,
   LineageGraph,
   LineageQuery,
   PaperId,
+  ReferenceId,
   ReferenceRecord,
   ChunkId,
 } from "@minato/core";
 import type { Db } from "./client.js";
 import { citations, referencesTable } from "./schema.js";
+
+const referenceRowToDomain = (
+  row: typeof referencesTable.$inferSelect,
+): ReferenceRecord => ({
+  id: row.id as ReferenceId,
+  paperId: row.paperId as PaperId,
+  ordinal: row.ordinal,
+  raw: row.raw,
+  doi: row.doi,
+  title: row.title,
+  authorsHint: row.authorsHint,
+  year: row.year,
+  resolvedPaperId: (row.resolvedPaperId as PaperId | null) ?? null,
+  resolveState: row.resolveState as ReferenceRecord["resolveState"],
+  resolveScore: row.resolveScore,
+  resolverVersion: row.resolverVersion,
+});
 
 export const makeCitationRepository = (db: Db): CitationRepository => ({
   async replaceReferences(paperId, refs: ReferenceRecord[]) {
@@ -33,6 +51,32 @@ export const makeCitationRepository = (db: Db): CitationRepository => ({
         })),
       );
     });
+  },
+
+  async listReferencesForPaper(paperId) {
+    const rows = await db
+      .select()
+      .from(referencesTable)
+      .where(eq(referencesTable.paperId, paperId))
+      .orderBy(asc(referencesTable.ordinal));
+    return rows.map(referenceRowToDomain);
+  },
+
+  async updateReferenceResolution(referenceId, update) {
+    const set: Record<string, unknown> = {
+      resolvedPaperId: update.resolvedPaperId,
+      resolveState: update.resolveState,
+      resolveScore: update.resolveScore,
+      resolverVersion: update.resolverVersion,
+    };
+    if (update.doi !== undefined) set.doi = update.doi;
+    if (update.title !== undefined) set.title = update.title;
+    if (update.authorsHint !== undefined) set.authorsHint = update.authorsHint;
+    if (update.year !== undefined) set.year = update.year;
+    await db
+      .update(referencesTable)
+      .set(set)
+      .where(eq(referencesTable.id, referenceId));
   },
 
   async upsertEdges(edges) {
