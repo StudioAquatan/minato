@@ -3,6 +3,7 @@ import { ingestCommand } from "./commands/ingest.js";
 import { searchCommand } from "./commands/search.js";
 import { reindexCommand } from "./commands/reindex.js";
 import { migrateCommand } from "./commands/migrate.js";
+import { papersListCommand } from "./commands/papers.js";
 
 type ParsedArgs = {
   positional: string[];
@@ -37,7 +38,8 @@ const usage = () => {
 Usage:
   minato migrate
   minato ingest <path> [--source name]
-  minato search "<query>" [--limit N] [--lang ja|en] [--year-from Y] [--year-to Y] [--semantic-ratio 0.5]
+  minato papers [list] [--limit N] [--offset N]
+  minato search "<query>" [--limit N] [--lang ja|en] [--year-from Y] [--year-to Y] [--semantic-ratio 0.5] [--chunks-per-paper N]
   minato reindex
 `);
 };
@@ -88,7 +90,22 @@ const main = async () => {
         if (yearTo !== undefined) opts.yearTo = yearTo;
         const semanticRatio = num(args.flags["semantic-ratio"]);
         if (semanticRatio !== undefined) opts.semanticRatio = semanticRatio;
+        const chunksPerPaper = num(args.flags["chunks-per-paper"]);
+        if (chunksPerPaper !== undefined) opts.chunksPerPaper = chunksPerPaper;
         await searchCommand(runtime, opts);
+        break;
+      }
+      case "papers": {
+        const sub = rest[0];
+        if (sub && sub !== "list") {
+          throw new Error(`unknown papers subcommand: ${sub}`);
+        }
+        const opts: Parameters<typeof papersListCommand>[1] = {};
+        const limit = num(args.flags["limit"]);
+        if (limit !== undefined) opts.limit = limit;
+        const offset = num(args.flags["offset"]);
+        if (offset !== undefined) opts.offset = offset;
+        await papersListCommand(runtime, opts);
         break;
       }
       case "reindex": {
