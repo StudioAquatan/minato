@@ -24,6 +24,7 @@
     "@minato/contracts": "workspace:*",
     "@opendataloader/pdf": "^2.5.0",
     "drizzle-orm": "^0.38.3",
+    "fast-xml-parser": "^4.5.1",
     "meilisearch": "^0.59.0",
     "pg": "^8.13.1",
     "postgres": "^3.4.5",

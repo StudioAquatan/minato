@@ -52,6 +52,20 @@ services:
             - driver: nvidia
               capabilities: [gpu]
 
+  grobid:
+    image: ${GROBID_IMAGE:-lfoppiano/grobid:0.8.2}
+    restart: unless-stopped
+    ports:
+      - "${GROBID_PORT:-8070}:8070"
+    environment:
+      JAVA_OPTS: ${GROBID_JAVA_OPTS:--Xmx4g}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8070/api/isalive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
 volumes:
   postgres_data:
   meili_data:

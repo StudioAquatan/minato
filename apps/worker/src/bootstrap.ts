@@ -23,7 +23,11 @@ import {
 } from "@minato/adapters/db";
 import { MeilisearchAdapter } from "@minato/adapters/search";
 import { OllamaEmbedder } from "@minato/adapters/llm";
-import { OpenDataLoaderParser } from "@minato/adapters/parser";
+import {
+  CombinedPdfParser,
+  GrobidClient,
+  OpenDataLoaderParser,
+} from "@minato/adapters/parser";
 import { LocalPdfStorage } from "@minato/adapters/storage";
 
 const findWorkspaceRoot = (start: string): string => {
@@ -50,6 +54,10 @@ export type BootstrapConfig = {
   embeddingDimensions: number;
   storageRoot: string;
   workspaceRoot: string;
+  grobidUrl: string;
+  grobidConcurrency: number;
+  grobidRequestTimeoutMs: number;
+  grobidMaxRetries: number;
 };
 
 const readEnv = (key: string, fallback?: string): string => {
@@ -72,6 +80,12 @@ export const loadConfig = (): BootstrapConfig => ({
   embeddingDimensions: Number(readEnv("EMBEDDING_DIMENSIONS", "1024")),
   storageRoot: readEnv("STORAGE_ROOT", "./data/pdf"),
   workspaceRoot,
+  grobidUrl: readEnv("GROBID_URL", "http://localhost:8070"),
+  grobidConcurrency: Number(readEnv("GROBID_CONCURRENCY", "4")),
+  grobidRequestTimeoutMs: Number(
+    readEnv("GROBID_REQUEST_TIMEOUT_MS", "300000"),
+  ),
+  grobidMaxRetries: Number(readEnv("GROBID_MAX_RETRIES", "3")),
 });
 
 export type Runtime = {
@@ -94,7 +108,14 @@ export const bootstrap = async (): Promise<Runtime> => {
     dimensions: config.embeddingDimensions,
   });
 
-  const parser = new OpenDataLoaderParser();
+  const odl = new OpenDataLoaderParser();
+  const grobid = new GrobidClient({
+    baseUrl: config.grobidUrl,
+    concurrency: config.grobidConcurrency,
+    requestTimeoutMs: config.grobidRequestTimeoutMs,
+    maxRetries: config.grobidMaxRetries,
+  });
+  const parser = new CombinedPdfParser({ odl, grobid });
   const storage = new LocalPdfStorage({
     root: config.storageRoot,
     workspaceRoot: config.workspaceRoot,
@@ -108,11 +129,13 @@ export const bootstrap = async (): Promise<Runtime> => {
     embedder,
   });
 
+  const citations = makeCitationRepository(db);
   const deps: Deps = {
     papers: makePaperRepository(db),
     files: makeFileRepository(db),
     sections: makeSectionRepository(db),
     chunks: makeChunkRepository(db),
+    citations,
     jobs: makeJobQueue(db),
     storage,
     parser,
@@ -130,7 +153,7 @@ export const bootstrap = async (): Promise<Runtime> => {
     deps,
     approvals: makeApprovalRepository(db),
     auditLogs: makeAuditLogRepository(db),
-    citations: makeCitationRepository(db),
+    citations,
     summaries: makeSummaryRepository(db),
     close: async () => {
       await pool.end();

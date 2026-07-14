@@ -11,6 +11,7 @@ import {
 import {
   createDb,
   makeChunkRepository,
+  makeCitationRepository,
   makeFileRepository,
   makeIndexGenerationRepository,
   makeJobQueue,
@@ -19,7 +20,11 @@ import {
 } from "@minato/adapters/db";
 import { MeilisearchAdapter } from "@minato/adapters/search";
 import { OllamaEmbedder } from "@minato/adapters/llm";
-import { OpenDataLoaderParser } from "@minato/adapters/parser";
+import {
+  CombinedPdfParser,
+  GrobidClient,
+  OpenDataLoaderParser,
+} from "@minato/adapters/parser";
 import { LocalPdfStorage } from "@minato/adapters/storage";
 
 const findWorkspaceRoot = (start: string): string => {
@@ -61,7 +66,14 @@ export const bootstrapCli = async (): Promise<CliRuntime> => {
     model: env("OLLAMA_EMBED_MODEL", "bge-m3"),
     dimensions: Number(env("EMBEDDING_DIMENSIONS", "1024")),
   });
-  const parser = new OpenDataLoaderParser();
+  const odl = new OpenDataLoaderParser();
+  const grobid = new GrobidClient({
+    baseUrl: env("GROBID_URL", "http://localhost:8070"),
+    concurrency: Number(env("GROBID_CONCURRENCY", "4")),
+    requestTimeoutMs: Number(env("GROBID_REQUEST_TIMEOUT_MS", "300000")),
+    maxRetries: Number(env("GROBID_MAX_RETRIES", "3")),
+  });
+  const parser = new CombinedPdfParser({ odl, grobid });
   const storage = new LocalPdfStorage({
     root: env("STORAGE_ROOT", "./data/pdf"),
     workspaceRoot,
@@ -80,6 +92,7 @@ export const bootstrapCli = async (): Promise<CliRuntime> => {
     files: makeFileRepository(db),
     sections: makeSectionRepository(db),
     chunks: makeChunkRepository(db),
+    citations: makeCitationRepository(db),
     jobs: makeJobQueue(db),
     storage,
     parser,

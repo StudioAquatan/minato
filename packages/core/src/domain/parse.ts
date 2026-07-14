@@ -32,6 +32,33 @@ export type ParseQuality = {
   headingCount: number;
   referenceCount: number;
   usedOcr: boolean;
+  headerFieldsPresent: number;
+  headerFieldsRequired: number;
+  grobidAvailable: boolean;
+};
+
+export type ParsedAuthor = {
+  fullName: string;
+  affiliation: string | null;
+};
+
+export type ParsedReference = {
+  ordinal: number;
+  teiId: string | null;
+  raw: string;
+  doi: string | null;
+  title: string | null;
+  authorsHint: string | null;
+  year: number | null;
+  venue: string | null;
+};
+
+export type ParsedCitationContext = {
+  refTeiId: string;
+  marker: string | null;
+  snippet: string;
+  page: number;
+  bbox: PageBBox | null;
 };
 
 export type ParsedDocument = {
@@ -40,11 +67,17 @@ export type ParsedDocument = {
   parserVersion: string;
   lang: string;
   title: string | null;
-  authors: string[];
+  titleJa: string | null;
+  authors: ParsedAuthor[];
+  abstract: string | null;
+  doi: string | null;
+  arxivId: string | null;
   year: number | null;
   venue: string | null;
   pageCount: number;
   elements: ParsedElement[];
-  references: string[];
+  references: ParsedReference[];
+  citationContexts: ParsedCitationContext[];
+  teiXml: string | null;
   quality: ParseQuality;
 };

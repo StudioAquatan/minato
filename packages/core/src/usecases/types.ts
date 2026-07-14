@@ -1,5 +1,6 @@
 import type {
   ChunkRepository,
+  CitationRepository,
   FileRepository,
   IndexAdmin,
   IndexGenerationRepository,
@@ -20,6 +21,7 @@ export type Deps = {
   files: FileRepository;
   sections: SectionRepository;
   chunks: ChunkRepository;
+  citations?: CitationRepository;
   jobs: JobQueue;
   storage: PdfStorage;
   parser: PdfParser;

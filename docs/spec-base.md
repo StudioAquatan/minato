@@ -68,13 +68,16 @@
 | postgres | 常駐サービス | 真実の源。メタデータ、本文チャンク、引用グラフ、要約、ジョブ、承認、監査ログを保持 |
 | meilisearch | 常駐サービス | 全文検索＋ベクトル検索。RDBから再構築可能な派生索引 |
 | ollama | 常駐サービス | 埋め込み（bge-m3）およびローカルLLM |
+| grobid | 常駐サービス | 書誌ヘッダおよび参考文献抽出のREST API。TEI XMLを返す |
 | api | 自作（Node.js） | Fastify。検索API、承認API、RAGストリーミング、エージェント対話 |
 | worker | 自作（Node.js） | ジョブキューの消化。ステートレスで複数起動可能 |
 | web | 自作 | 検索、PDF表示、引用グラフ、承認、運用画面 |
 
-GROBIDは取り込み時のみ必要なためオンデマンド起動とする。エージェントランナーは独立した `apps/agent` とし、APIまたはCLIから起動する。
+エージェントランナーは独立した `apps/agent` とし、APIまたはCLIから起動する。
 
-ホスト／コンテナ要件はNode.js 20+、Java 11+とする。JavaはPDF解析を実行するworkerイメージに同梱する。
+GROBIDは公式イメージ（`grobid/grobid`）を常駐させ、workerからHTTPで呼び出す。JVMおよびモデルのウォームアップはコンテナ起動時に一度だけ発生させ、取り込みジョブごとの起動コストを排除する。GROBIDのGPU利用可否はホスト構成で切り替える。
+
+ホスト／コンテナ要件はNode.js 20+とする。JVMはGROBIDコンテナに閉じ、workerイメージへJavaを同梱しない。
 
 ### 2.2 データの役割分担
 
@@ -405,11 +408,64 @@ export type PdfParseInput = {
 | 役割 | ツール | 出力 |
 |---|---|---|
 | 本文・座標・読み順 | OpenDataLoader | 要素型、テキスト、bbox、ページ番号 |
-| 書誌ヘッダ・参考文献 | GROBID | TEI XML |
+| 書誌ヘッダ・参考文献 | GROBID（REST API） | TEI XML（biblStructおよび引用位置座標を含む） |
 | 日本語フォールバック | ローカルLLM（`extract_refs`） | 構造化書誌・参考文献 |
 | OCR | OpenDataLoaderハイブリッドモード | OCR済みテキストと座標 |
 
-`convert()` のJVM起動コストを考慮し、workerは複数PDFをまとめて解析する。ポートは配列入力とし、1件ずつの呼び出しを標準経路にしない。
+`PdfParser` アダプタはOpenDataLoaderの解析結果とGROBIDのTEI XMLを合流させ、`ParsedDocument` を返す。両者は独立にリクエストできるため、1件のPDFに対して並列に呼び出してよい。個別PDFの解析失敗が他へ波及しないよう、ポートは配列入力とし、各要素の成否を個別に返す。
+
+### 6.3.1 GROBID連携
+
+GROBIDは常駐サービスとして起動し、workerからHTTPで呼び出す。JVMおよびモデルロードのコストはコンテナ起動時に一度だけ発生し、以降の解析要求はスレッドプール上で処理される。
+
+利用するエンドポイントを次に定める。
+
+| 用途 | エンドポイント | メモ |
+|---|---|---|
+| 初回解析 | `POST /api/processFulltextDocument` | ヘッダ、本文構造、参考文献、引用位置を一度に取得する主経路 |
+| ヘッダのみ再解析 | `POST /api/processHeaderDocument` | 書誌情報だけを更新したい場合に用いる |
+| 参考文献のみ再解析 | `POST /api/processReferences` | 参考文献抽出ロジック改善時の再処理に用いる |
+| ヘルスチェック | `GET /api/isalive` | 起動時と定期的な生存確認に用いる |
+
+主経路の呼び出しは `multipart/form-data` のPOSTで、`input` にPDFバイト列を渡す。Acceptは既定の `application/xml` とする。
+
+呼び出し時のパラメータは次を既定とする。
+
+- `consolidateHeader=0`／`consolidateCitations=0`／`consolidateFunders=0`
+  - GROBID内蔵のCrossRef／biblio-glutton照会は使わず、外部書誌解決は `BiblioResolver` アダプタへ集約する。キャッシュ、レート制限、優先順位を単一箇所で制御するため
+- `includeRawCitations=1`
+  - 参考文献の生文字列を `references.raw` として保存し、`PaperMatcher` の入力に用いる
+- `includeRawAffiliations=1`
+  - 著者所属の原文を保持する
+- `teiCoordinates=biblStruct,ref,persName,figure,formula,s`
+  - 参考文献ブロック、本文中の引用マーカー、著者名、図、数式、文の座標を取得する。PDF出典ジャンプおよびチャンクとの対応付けに用いる
+- `segmentSentences=1`
+  - 文単位で `<s>` を得て、引用文脈チャンクの境界とそろえる
+- `start`／`end` は指定せず全ページを対象とする
+
+呼び出し方針を次に定める。
+
+- worker側の同時実行数はGROBIDの `concurrency` 設定と揃え、超過分はworker側で待機させる。`poolMaxWait` は短く保ち、サーバ側で長時間キューさせない
+- 503応答は一時エラーとして扱い、指数バックオフで再試行する。`Retry-After` ヘッダがあれば優先する
+- タイムアウト、接続失敗、5xxは一時エラー扱いとする。400／413等は恒久エラーとしジョブを `dead` へ落とす前に品質判定側へ引き渡す
+- リクエストタイムアウトはPDFページ数と過去実績から動的に決定し、既定は1件あたり数分程度とする。上限は明示的に打ち切る
+- レスポンスの `application/xml` はfast-xml-parserでパースし、TEI名前空間を保持したままドメイン型へ写像する
+- GROBIDが継続的に応答しない場合はサーキットブレーカで新規呼び出しを一時停止し、対象ジョブは `retry_wait` へ戻す
+
+TEI XMLから次を抽出する。
+
+- 書誌ヘッダ: `teiHeader/fileDesc/titleStmt/title`、著者と所属、要旨、DOI、arXiv ID、公開年、雑誌または会議名
+- 参考文献: `listBibl/biblStruct` を1件ずつ `references` レコードへ写像し、`@xml:id` と生文字列を併記する
+- 引用文脈: 本文中の `<ref type="bibr" target="#b0"/>` を検出し、直近の `<s>` または段落を `citations.context` として保存する。`teiCoordinates` から得たページとbboxを併せて付与する
+- 図表・数式: 座標のみを保持し、本文チャンクとの対応関係はOpenDataLoader側の読み順を優先する
+
+GROBID出力とOpenDataLoader出力は次の規則で統合する。
+
+- 本文テキスト、読み順、ページ、bboxはOpenDataLoaderを正とする
+- ヘッダ、参考文献、本文中の引用マーカーはGROBIDを正とする
+- 引用位置の座標は、GROBIDが返したbboxをOpenDataLoaderのbbox系へ最近傍で対応付け、下流で用いる座標系を単一化する
+
+TEI XMLは解析ジョブの成果物として短期保管し、`parserVersion` を伴ってRDBまたはローカルファイルストアへ格納する。保管対象と期限は運用設定で切り替える。品質指標は `6.4` に統合する。
 
 ### 6.4 品質判定
 

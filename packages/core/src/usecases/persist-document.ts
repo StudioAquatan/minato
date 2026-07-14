@@ -4,6 +4,8 @@ import type {
   Paper,
   PaperId,
   ParsedDocument,
+  ReferenceId,
+  ReferenceRecord,
 } from "../domain/index.js";
 import type { Deps } from "./types.js";
 import { chunkDocument } from "../services/chunker.js";
@@ -44,11 +46,14 @@ export const persistDocument = async (
 
   const paper: Paper = {
     id: paperId,
-    doi: existing?.doi ?? null,
+    doi: document.doi ?? existing?.doi ?? null,
     openalexId: existing?.openalexId ?? null,
     title: document.title ?? existing?.title ?? "(untitled)",
-    titleJa: existing?.titleJa ?? null,
-    authors: document.authors.map((name) => ({ fullName: name })),
+    titleJa: document.titleJa ?? existing?.titleJa ?? null,
+    authors: document.authors.map((a) => ({
+      fullName: a.fullName,
+      ...(a.affiliation ? { affiliations: [a.affiliation] } : {}),
+    })),
     year: document.year ?? existing?.year ?? null,
     venue: document.venue ?? existing?.venue ?? null,
     lang: detectedLang,
@@ -70,6 +75,24 @@ export const persistDocument = async (
 
   await deps.sections.replaceForPaper(paperId, sections);
   await deps.chunks.replaceForPaper(paperId, chunks);
+
+  if (deps.citations && document.references.length > 0) {
+    const refs: ReferenceRecord[] = document.references.map((r) => ({
+      id: deps.idGen.newId("ref") as ReferenceId,
+      paperId,
+      ordinal: r.ordinal,
+      raw: r.raw,
+      doi: r.doi,
+      title: r.title,
+      authorsHint: r.authorsHint,
+      year: r.year,
+      resolvedPaperId: null,
+      resolveState: "unresolved",
+      resolveScore: null,
+      resolverVersion: null,
+    }));
+    await deps.citations.replaceReferences(paperId, refs);
+  }
 
   const followUp: JobSpec[] = [
     {

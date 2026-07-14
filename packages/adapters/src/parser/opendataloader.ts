@@ -5,9 +5,12 @@ import { convert } from "@opendataloader/pdf";
 import type {
   FileId,
   PageBBox,
+  ParseQuality,
+  ParsedAuthor,
   ParsedDocument,
   ParsedElement,
   ParsedElementKind,
+  ParsedReference,
   PdfParseInput,
   PdfParser,
 } from "@minato/core";
@@ -128,7 +131,7 @@ const gatherReferences = (elements: OdlElement[]): string[] => {
   return refs;
 };
 
-const computeQuality = (elements: ParsedElement[]) => {
+const computeQuality = (elements: ParsedElement[]): ParseQuality => {
   const totalChars = elements.reduce((n, el) => n + el.text.length, 0);
   const pages = new Set(elements.map((el) => el.page));
   const pageCount = Math.max(1, pages.size);
@@ -151,6 +154,9 @@ const computeQuality = (elements: ParsedElement[]) => {
     headingCount,
     referenceCount,
     usedOcr: false,
+    headerFieldsPresent: 0,
+    headerFieldsRequired: 0,
+    grobidAvailable: false,
   };
 };
 
@@ -158,6 +164,11 @@ export type OpenDataLoaderParserOptions = {
   parserVersion?: string;
   workDir?: string;
   keepTempFiles?: boolean;
+};
+
+export type OpenDataLoaderParseResult = {
+  input: PdfParseInput;
+  document: ParsedDocument;
 };
 
 export class OpenDataLoaderParser implements PdfParser {
@@ -172,6 +183,13 @@ export class OpenDataLoaderParser implements PdfParser {
   }
 
   async parse(inputs: PdfParseInput[]): Promise<ParsedDocument[]> {
+    const results = await this.parseAll(inputs);
+    return results.map((r) => r.document);
+  }
+
+  async parseAll(
+    inputs: PdfParseInput[],
+  ): Promise<OpenDataLoaderParseResult[]> {
     if (inputs.length === 0) return [];
 
     const baseDir =
@@ -201,16 +219,19 @@ export class OpenDataLoaderParser implements PdfParser {
           jsonByBaseName.set(basename(f, ".json"), join(outputDir, f));
         }
       }
-      const documents: ParsedDocument[] = [];
+      const results: OpenDataLoaderParseResult[] = [];
       for (const input of inputs) {
         const key = basename(input.absolutePath, extname(input.absolutePath));
         const path = jsonByBaseName.get(key);
         if (!path) continue;
         const raw = await readFile(path, "utf8");
         const doc = JSON.parse(raw) as OdlDocument | OdlElement[];
-        documents.push(this.toParsedDocument(input.fileId, input.sha256, doc));
+        results.push({
+          input,
+          document: this.toParsedDocument(input.fileId, input.sha256, doc),
+        });
       }
-      return documents;
+      return results;
     } finally {
       if (!this.keepTempFiles) {
         await rm(outputDir, { recursive: true, force: true });
@@ -253,13 +274,16 @@ export class OpenDataLoaderParser implements PdfParser {
       metadata?.title ??
       elements.find((e) => e.kind === "title")?.text ??
       null;
-    const authors = metadata?.authors
+    const authorNames = metadata?.authors
       ? Array.isArray(metadata.authors)
         ? metadata.authors
         : String(metadata.authors).split(/\s*[,;]\s*/)
       : [];
+    const authors: ParsedAuthor[] = authorNames
+      .filter((n) => n.trim().length > 0)
+      .map((n) => ({ fullName: n.trim(), affiliation: null }));
     const inferredYear = elements
-      .map((_, i, arr) => parseYear(rawElements[i] ?? {} as OdlElement))
+      .map((_, i) => parseYear(rawElements[i] ?? {} as OdlElement))
       .find((y): y is number => y !== null) ?? null;
     const year = metadata?.year ?? inferredYear;
     const venue = metadata?.venue ?? null;
@@ -268,7 +292,17 @@ export class OpenDataLoaderParser implements PdfParser {
       metadata?.pageCount ??
       Math.max(1, ...elements.map((e) => e.page), 1);
 
-    const references = gatherReferences(rawElements);
+    const rawRefs = gatherReferences(rawElements);
+    const references: ParsedReference[] = rawRefs.map((raw, i) => ({
+      ordinal: i,
+      teiId: null,
+      raw,
+      doi: null,
+      title: null,
+      authorsHint: null,
+      year: null,
+      venue: null,
+    }));
     const quality = computeQuality(elements);
     const lang = detectLang(elements.map((e) => e.text).join("\n"));
 
@@ -278,12 +312,18 @@ export class OpenDataLoaderParser implements PdfParser {
       parserVersion: this.parserVersion,
       lang,
       title,
+      titleJa: null,
       authors,
+      abstract: null,
+      doi: null,
+      arxivId: null,
       year,
       venue,
       pageCount,
       elements,
       references,
+      citationContexts: [],
+      teiXml: null,
       quality,
     };
   }
